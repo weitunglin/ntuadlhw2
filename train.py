@@ -763,7 +763,7 @@ def main():
                 )
 
         result, rouge = None, None
-        if epoch == (args.num_train_epochs - 1) or (epoch != 0 and (epoch + 1) > args.num_warmup_epochs_to_eval and (epoch + 1) % args.num_train_epochs_to_eval != 0):
+        if epoch == (args.num_train_epochs - 1) or (epoch != 0 and (epoch + 1) > args.num_warmup_epochs_to_eval and ((epoch + 1) % args.num_train_epochs_to_eval == 0)):
             transformers.utils.logging.set_verbosity_warning()
             model.eval()
     

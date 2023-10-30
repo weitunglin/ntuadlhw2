@@ -502,18 +502,34 @@ def main():
         model, eval_dataloader
     )
 
+    if args.resume_from_checkpoint:
+        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
+            checkpoint_path = args.resume_from_checkpoint
+            path = os.path.basename(args.resume_from_checkpoint)
+        else:
+            # Get the most recent checkpoint
+            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
+            dirs.sort(key=os.path.getctime)
+            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
+            checkpoint_path = path
+            path = os.path.basename(checkpoint_path)
+
+        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
+        accelerator.load_state(checkpoint_path)
+
     gen_list = {
         'beam_search_5': {
             'max_length': args.val_max_target_length,
             'num_beams': 5
         },
-        'beam_search_10': {
+        'beam_search_20_no_repeat_2_gram': {
             'max_length': args.val_max_target_length,
-            'num_beams': 10
+            'num_beams': 20,
+            'no_repeat_ngram_size': 2
         },
-        'beam_search_10_no_repeat_2_gram': {
+        'beam_search_30_no_repeat_2_gram': {
             'max_length': args.val_max_target_length,
-            'num_beams': 10,
+            'num_beams': 30,
             'no_repeat_ngram_size': 2
         },
         'greedy': {
@@ -557,6 +573,15 @@ def main():
             'do_sample': True,
             'top_p': 0.92,
             'top_k': 0
+        },
+    }
+
+    gen_list = {
+        'beam_search_30_no_repeat_2_gram_early_stopping': {
+            'max_length': args.val_max_target_length,
+            'num_beams': 30,
+            'no_repeat_ngram_size': 2,
+            'early_stopping': True
         },
     }
 
