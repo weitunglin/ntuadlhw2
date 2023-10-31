@@ -163,3 +163,4 @@ weitung8/
 wandb/
 ntuadlhw2-data/
 *.lock
+*.local

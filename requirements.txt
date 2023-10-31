@@ -10,4 +10,6 @@ evaluate
 ckiptagger[gdown]
 icecream
 torch_optimizer
-tw_rouge
+git+https://github.com/cccntu/tw_rouge.git
+wandb
+transformers
