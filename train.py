@@ -54,7 +54,7 @@ from transformers import (
     SchedulerType,
     get_scheduler,
 )
-from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
+from transformers.utils import is_offline_mode, send_example_telemetry
 from transformers.utils.versions import require_version
 
 
@@ -342,6 +342,16 @@ def parse_args():
         default=None,
         help="Number of max eval samples.",
     )
+    parser.add_argument(
+        "--use_8bit",
+        action="store_true",
+        help="Whether to use 8bit model and 8bit optimizer.",
+    )
+    parser.add_argument(
+        "--use_rl",
+        action="store_true",
+        help="Whether to use reinforcement learning.",
+    )
     args = parser.parse_args()
 
     # Sanity checks
@@ -360,6 +370,10 @@ def parse_args():
 
     return args
 
+def get_reward(preds, labels):
+    from tw_rouge import get_rouge
+    rouge = get_rouge(preds, labels)
+    return (rouge['rouge-1']['f'] + rouge['rouge-2']['f'] + rouge['rouge-l']['f']) / 3
 
 def main():
     args = parse_args()
@@ -375,6 +389,9 @@ def main():
     if args.with_tracking:
         accelerator_log_kwargs["log_with"] = args.report_to
         accelerator_log_kwargs["project_dir"] = args.output_dir
+
+    if args.use_8bit:
+        import bitsandbytes as bnb
 
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs)
     if args.source_prefix is None and args.model_name_or_path in [
@@ -495,7 +512,7 @@ def main():
             args.model_name_or_path,
             from_tf=bool(".ckpt" in args.model_name_or_path),
             config=config,
-            trust_remote_code=args.trust_remote_code,
+            trust_remote_code=args.trust_remote_code
         )
     else:
         logger.info("Training new model from scratch")
@@ -629,6 +646,9 @@ def main():
     else:
         optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
+    if args.use_8bit:
+        optimizer = bnb.optim.AdamW8bit(optimizer_grouped_parameters, lr=args.learning_rate)
+
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -733,6 +753,9 @@ def main():
                 # We keep track of the loss at each epoch
                 if args.with_tracking:
                     total_loss += loss.detach().float()
+                # TODO complete RL loss
+                if args.use_rl:
+                    loss = loss - get_reward(preds, labels)
                 accelerator.backward(loss)
                 optimizer.step()
                 lr_scheduler.step()
@@ -752,8 +775,8 @@ def main():
 
             if completed_steps >= args.max_train_steps:
                 break
-            
-            if completed_steps % 10 == 0 and args.with_tracking and step != 0:          
+
+            if completed_steps % 2 == 0 and args.with_tracking and step != 0:
                 accelerator.log({
                         "running_loss": loss.detach().float(),
                         "step": completed_steps,
@@ -766,7 +789,7 @@ def main():
         if epoch == (args.num_train_epochs - 1) or (epoch != 0 and (epoch + 1) > args.num_warmup_epochs_to_eval and ((epoch + 1) % args.num_train_epochs_to_eval == 0)):
             transformers.utils.logging.set_verbosity_warning()
             model.eval()
-    
+
             gen_kwargs = {
                 "max_length": args.val_max_target_length,
                 "num_beams": args.num_beams,
@@ -782,7 +805,7 @@ def main():
                         attention_mask=batch["attention_mask"],
                         **gen_kwargs,
                     )
-    
+
                     generated_tokens = accelerator.pad_across_processes(
                         generated_tokens, dim=1, pad_index=tokenizer.pad_token_id
                     )
@@ -790,11 +813,11 @@ def main():
                     if not args.pad_to_max_length:
                         # If we did not pad to max length, we need to pad the labels too
                         labels = accelerator.pad_across_processes(batch["labels"], dim=1, pad_index=tokenizer.pad_token_id)
-    
+
                     generated_tokens, labels = accelerator.gather_for_metrics((generated_tokens, labels))
                     generated_tokens = generated_tokens.cpu().numpy()
                     labels = labels.cpu().numpy()
-    
+
                     if args.ignore_pad_token_for_loss:
                         # Replace -100 in the labels as we can't decode them.
                         labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
@@ -802,7 +825,7 @@ def main():
                         generated_tokens = generated_tokens[0]
                     decoded_preds = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
                     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-    
+
                     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
                     metric.add_batch(
                         predictions=decoded_preds,
