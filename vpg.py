@@ -14,7 +14,8 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch import optim
+#from torch import optim
+import torch_optimizer as optim
 from torch import tensor
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -31,7 +32,7 @@ import tensorflow as tf
 devices = tf.config.list_physical_devices('GPU')
 try:
     tf.config.experimental.set_memory_growth(devices[0], True)
-    tf.config.experimental.per_process_gpu_memory_fraction(0.5)
+    tf.config.experimental.per_process_gpu_memory_fraction(0.4)
     print("Success in setting memory growth")
 except:
     print("Failed to set memory growth, invalid device or cannot modify virtual devices once initialized.")
@@ -67,7 +68,7 @@ class PolicyEstimator():
     def predict(self, observation):
         return self.network(torch.FloatTensor(observation))
 
-def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.99, render=False,
+def vanilla_policy_gradient(num_episodes=1500, batch_size=1, discount_factor=0.99, render=False,
                             early_exit_reward_amount=None):
 
     vocab_size = 250112
@@ -82,7 +83,7 @@ def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.
         raw_datasets['valid'] = raw_datasets['valid'].select(range(20))
 
     config = AutoConfig.from_pretrained('weitung8/ntuadlhw2', trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained('weitung8/ntuadlhw2', use_fast=True, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('weitung8/ntuadlhw2', use_fast=True, trust_remote_code=True, load_in_8bit=True)
     model = AutoModelForSeq2SeqLM.from_pretrained('weitung8/ntuadlhw2', config=config)
 
     text_column = 'maintext'
@@ -147,7 +148,7 @@ def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.
     )
     eval_dataloader = DataLoader(eval_dataset, collate_fn=data_collator, batch_size=1)
 
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = optim.Adafactor(model.parameters(), lr=3e-5)
     action_space = np.arange(vocab_size)
 
     for current_episode in range(num_episodes):
@@ -159,6 +160,7 @@ def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.
             batch.to('cuda')
             outputs = model(**batch, output_hidden_states=True)
 
+            """
             if debug:
                 ic(batch.keys())
                 for (k, v) in outputs.items():
@@ -171,6 +173,7 @@ def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.
                                 ic(type(x))
                     if isinstance(v, torch.Tensor):
                         ic(v.size())
+            """
 
             with torch.no_grad():
                 def get_reward(preds, labels):
@@ -210,22 +213,33 @@ def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.
                     generated_tokens = generated_tokens[0]
                 decoded_preds = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
                 decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-                if debug:
-                    ic(decoded_preds)
-                    ic(decoded_labels)
+                if decoded_preds[0] == '':
+                    continue
+
+                if True or debug:
+                    ic(decoded_preds, decoded_labels)
+
                 rewards = get_reward(decoded_preds, decoded_labels)
                 ic(rewards)
 
-            batch_observations.extend(outputs['encoder_hidden_states'])
-            batch_actions.extend(outputs['decoder_hidden_states'])
-            batch_rewards.extend([0.0 for i in range(len(outputs['decoder_hidden_states'])-1)])
+            #batch_actions.extend(outputs['decoder_hidden_states'][-1])
+            logits = torch.max(outputs['logits'], dim=-1).values
+            logits = logits.reshape(logits.shape[1], logits.shape[0]).squeeze()
+            batch_actions.extend(logits)
+            batch_observations.extend(outputs['decoder_hidden_states'][0])
+            batch_rewards.extend([0.0 for i in range(outputs['decoder_hidden_states'][1].size()[1]-1)])
             batch_rewards.extend(rewards)
 
             if debug:
-                ic(batch_rewards[-9])
+                ic(logits)
+                ic(logits.shape)
+
+            """
+            if debug:
                 ic(len(batch_observations))
                 ic(len(batch_actions))
                 ic(len(batch_rewards))
+            """
 
             batch_counter += 1
             total_rewards.append(sum(rewards))
@@ -236,13 +250,26 @@ def vanilla_policy_gradient(num_episodes=1500, batch_size=10, discount_factor=0.
 
                 # tensorify things
                 batch_rewards = torch.FloatTensor(torch.tensor(batch_rewards))
-                batch_observationss = torch.FloatTensor(torch.tensor(batch_observations))
-                batch_actions = torch.LongTensor(torch.tensor(batch_actions))
+                batch_observations = (torch.vstack(batch_observations))
+                batch_actions = (torch.vstack(batch_actions))
+
+                if debug:
+                    ic(batch_actions.dtype)
+                    ic(batch_actions.element_size() * batch_actions.nelement())
+
+                if debug:
+                    ic(batch_observations.shape)
+                    ic(batch_actions.shape)
+                    ic(batch_rewards.shape)
 
                 # calculate loss
-                logprob = torch.log(estimator.predict(batch_observations))
-                batch_actions = batch_actions.reshape(len(batch_actions), 1)
-                selected_logprobs = batch_rewards * torch.gather(logprob, 1, batch_actions).squeeze()
+                # logprob = torch.log(estimator.predict(batch_observations))
+                logprob = torch.ones(batch_actions.shape[0], 1, device='cuda')
+                # batch_actions = batch_actions.reshape(len(batch_actions), 1)
+                # selected_logprobs = batch_rewards * torch.gather(logprob, 1, batch_actions).squeeze()
+                batch_rewards = batch_rewards.reshape(batch_rewards.shape[0], 1)
+                batch_rewards = batch_rewards.to('cuda')
+                selected_logprobs = batch_rewards * batch_actions * 0.01
                 loss = -selected_logprobs.mean()
 
                 # backprop/optimize
