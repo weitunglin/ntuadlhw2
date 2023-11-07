@@ -4,7 +4,7 @@ curl -L -o 'ntuadlhw2-data/train.jsonl' 'https://huggingface.co/datasets/weitung
 curl -L -o 'ntuadlhw2-data/public.jsonl' 'https://huggingface.co/datasets/weitung8/ntuadlhw2/resolve/main/valid.jsonl'
 curl -L -o 'ntuadlhw2-data/sample_test.jsonl' 'https://huggingface.co/datasets/weitung8/ntuadlhw2/resolve/main/sample_test.jsonl'
 
-mkdir weitung8/ntuadlhw2
+mkdir -p weitung8/ntuadlhw2
 
 curl -L -o 'weitung8/ntuadlhw2/config.json' 'https://huggingface.co/weitung8/ntuadlhw2/resolve/main/config.json'
 curl -L -o 'weitung8/ntuadlhw2/generation_config.json' 'https://huggingface.co/weitung8/ntuadlhw2/resolve/main/generation_config.json'
