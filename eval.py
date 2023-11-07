@@ -272,7 +272,7 @@ def parse_args():
 
     return args
 
-def eval(args, accelerator, model, tokenizer, eval_dataloader, postprocess_text, gen_kwargs, gen_type):
+def eval(args, accelerator, model, tokenizer, ids, eval_dataloader, postprocess_text, gen_kwargs, gen_type):
     transformers.utils.logging.set_verbosity_warning()
     model.eval()
 
@@ -309,7 +309,7 @@ def eval(args, accelerator, model, tokenizer, eval_dataloader, postprocess_text,
             all_decoded_preds.extend(decoded_preds)
             all_decoded_labels.extend(decoded_labels)
 
-    df = pd.DataFrame(data={'preds':all_decoded_preds,'labels':all_decoded_labels})
+    df = pd.DataFrame(data={'title':all_decoded_preds,'labels':all_decoded_labels, 'id':ids})
     df.to_json(os.path.join(args.output_dir, f"eval_results_{gen_type}.jsonl"), orient='records', lines=True)
 
     try:
@@ -463,6 +463,8 @@ def main():
         model_inputs["labels"] = labels["input_ids"]
         return model_inputs
 
+    ids = raw_datasets['validation']['id']
+
     with accelerator.main_process_first():
         # Temporarily set max_target_length for validation.
         max_target_length = args.val_max_target_length
@@ -517,6 +519,7 @@ def main():
         accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
         accelerator.load_state(checkpoint_path)
 
+    """
     gen_list = {
         'beam_search_5': {
             'max_length': args.val_max_target_length,
@@ -527,10 +530,11 @@ def main():
             'num_beams': 20,
             'no_repeat_ngram_size': 2
         },
-        'beam_search_30_no_repeat_2_gram': {
+        'beam_search_30_no_repeat_2_gram_early_stopping': {
             'max_length': args.val_max_target_length,
             'num_beams': 30,
-            'no_repeat_ngram_size': 2
+            'no_repeat_ngram_size': 2,
+            'early_stopping': True,
         },
         'greedy': {
             'max_length': args.val_max_target_length,
@@ -546,11 +550,17 @@ def main():
             'do_sample': True,
             'top_k': 0
         },
-        'top_k_0_temp_0.6': {
+        'top_k_0_temp_0.8': {
             'max_length': args.val_max_target_length,
             'do_sample': True,
             'top_k': 0,
-            'temperature': 0.6
+            'temperature': 0.8
+        },
+        'top_k_0_temp_0.9': {
+            'max_length': args.val_max_target_length,
+            'do_sample': True,
+            'top_k': 0,
+            'temperature': 0.9
         },
         'top_k_5': {
             'max_length': args.val_max_target_length,
@@ -562,19 +572,20 @@ def main():
             'do_sample': True,
             'top_k': 10
         },
-        'top_p_0.9': {
+        'top_p_0.95': {
             'max_length': args.val_max_target_length,
             'do_sample': True,
-            'top_p': 0.9,
+            'top_p': 0.95,
             'top_k': 0
         },
-        'top_p_0.92': {
+        'top_p_0.98': {
             'max_length': args.val_max_target_length,
             'do_sample': True,
-            'top_p': 0.92,
+            'top_p': 0.98,
             'top_k': 0
         },
     }
+    """
 
     gen_list = {
         'beam_search_30_no_repeat_2_gram_early_stopping': {
@@ -590,7 +601,7 @@ def main():
         gen_kwargs = gen_list[gen_type]
         logger.info(f'*** Running {gen_type} ***')
         logger.info(f'{gen_kwargs}')
-        rouge = eval(args, accelerator, model, tokenizer, eval_dataloader, postprocess_text, gen_kwargs, gen_type)
+        rouge = eval(args, accelerator, model, tokenizer, ids, eval_dataloader, postprocess_text, gen_kwargs, gen_type)
         if rouge is not None:
             logger.info(rouge)
             results[gen_type] = rouge
@@ -607,3 +618,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

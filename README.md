@@ -1,5 +1,11 @@
 # ntuadlhw2
 
+## inference & eval
+
+```bash run.sh ntuadlhw2-data/public.jsonl submission_public.jsonl```
+
+```python ADL23-HW2/eval.py -r ntuadlhw2-data/public.jsonl -s submission_public.jsonl```
+
 ## experiments
 
 ### train model
@@ -13,3 +19,4 @@
 ### eval using different generators
 
 ```python eval.py --model_name_or_path weitung8/ntuadlhw2 --dataset_name ntuadlhw2-data --text_column maintext --per_device_eval_batch_size 2 --max_source_length 256 --max_target_length 64 --val_max_target_length 64 --seed 41 --output_dir weitung8/ntuadlhw2```
+
